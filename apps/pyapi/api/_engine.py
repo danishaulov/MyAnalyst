@@ -81,7 +81,7 @@ def _is_datelike(s: pd.Series) -> bool:
     # Year-like columns are far more useful as metrics/attributes; real dates arrive as strings or
     # datetime dtype.
     numeric = pd.to_numeric(s, errors="coerce")
-    if numeric.notna().mean() > 0.8:
+    if len(s.dropna()) and numeric.notna().sum() / len(s.dropna()) > 0.8:
         return False
     sample = s.dropna().astype(str).head(50)
     if sample.empty:
@@ -100,7 +100,8 @@ def profile(df: pd.DataFrame) -> list[dict[str, Any]]:
         fill = float(len(non_null) / n) if n else 0.0
         card_ratio = distinct / n if n else 0.0
         numeric = pd.to_numeric(s, errors="coerce")
-        num_frac = float(numeric.notna().mean())
+        # Missing cells affect quality/fill, not the type of the values that actually exist.
+        num_frac = float(numeric.notna().sum() / len(non_null)) if len(non_null) else 0.0
         is_date = _is_datelike(s)
         is_num = num_frac > 0.8 and not is_date
 

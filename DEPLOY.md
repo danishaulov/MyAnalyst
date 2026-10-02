@@ -43,7 +43,32 @@ templated narrator is used). See `apps/web/.env.example` for details.
 ## Sanity check after deploy
 - `/` → landing page
 - `/analyze` → the analyzer (try `/analyze?demo=1` for the sample)
-- `/api/insights` → returns `{"insights":[],"provider":"none"}` on a POST when no key is set
+- `/api/insights` → returns `{"insights":[],"provider":"none"}` on a POST with `{"kpis":[]}` when no key is set
+
+## Python compute project and preview checks
+
+Deploy the Python service separately with Root Directory `apps/pyapi`, then point the web project's
+`NEXT_PUBLIC_PY_API` at that service. Its AI settings are independent of the web project's settings;
+see `apps/pyapi/.env.example`. Configure secrets only on the server.
+
+The API now allows exact origins using `API_ALLOWED_ORIGINS`. Its defaults include `myanalyst.net`,
+`www.myanalyst.net` and local development on port 3000. To test a Vercel preview, add the **actual web
+preview origin** to the Python project's list and redeploy that API preview. Do not use a wildcard
+for all Vercel projects. CORS is not authentication; shared account quotas still require a gateway.
+
+Before production rollout, test both projects as previews:
+
+1. `GET /api/index` on the Python service returns health and AI availability.
+2. POST a small dataset to `/api/analyze`; verify KPIs and `scope`.
+3. POST `total Revenue by Region?` and the same dataset to `/api/ask`; verify the actual group totals.
+4. Open the web preview, upload CSV and multi-sheet Excel, inspect the AI summary, and export a chart/report.
+5. Verify malformed input returns 400, oversized input returns 413, and disallowed browser origins receive 403.
+
+Roll out the API first, then the web app. Retain the previous deployments for rollback. The changes are
+backward compatible with normal existing client payloads, except unknown routes, malformed data and
+unlisted origins now fail explicitly. They do not require database migrations.
+
+See `docs/07-backend-reliability.md` for implementation limits and the next backend priorities.
 
 ## SEO — refreshing the favicon & search snippet on Google
 

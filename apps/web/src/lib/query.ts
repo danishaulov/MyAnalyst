@@ -1700,9 +1700,9 @@ async function planQuestion(question: string, table: Table, profiles: ColumnProf
 
 // In-memory cache of answered questions (per dataset), so asking the same thing twice is instant and
 // doesn't spend another LLM call - cheaper, and far less likely to hit the provider's rate limit.
-const answerCache = new Map<string, RichAnswer>();
+const answerCache = new WeakMap<Table, { domain?: string; analysis?: AskAnalysis; entries: Map<string, RichAnswer> }>();
 const ANSWER_CACHE_MAX = 80;
-const cacheKey = (question: string, table: Table): string => `${table.name}|${table.rowCount}|${question.trim().toLowerCase().replace(/\s+/g, " ")}`;
+const cacheKey = (question: string): string => question.trim().toLowerCase().replace(/\s+/g, " ");
 
 /**
  * Cached entry point for the AI answer. A repeat of the same question (same dataset) returns the prior
@@ -1721,14 +1721,21 @@ export async function answerQuestionAI(
   // here too - so a "$" / "€" answer matches the dashboard regardless of how we got to this dataset.
   setActiveCurrency(detectCurrency(table, profiles));
   // Cache hits only apply to fresh questions (no prior conversation), so follow-ups still get context.
-  const key = cacheKey(question, table);
-  if ((!history || history.length === 0) && answerCache.has(key)) return answerCache.get(key)!;
+  // Two uploads may share a filename and row count while containing entirely different data.
+  // Scope cached answers to the actual table and analysis context, and release them with the table.
+  let cache = answerCache.get(table);
+  if (!cache || cache.domain !== domain || cache.analysis !== analysis) {
+    cache = { domain, analysis, entries: new Map() };
+    answerCache.set(table, cache);
+  }
+  const key = cacheKey(question);
+  if ((!history || history.length === 0) && cache.entries.has(key)) return cache.entries.get(key)!;
 
   const result = await runAnswerAI(question, table, profiles, domain, history, onToken, analysis);
 
   if (result.source === "llm" && result.ok && (!history || history.length === 0)) {
-    if (answerCache.size >= ANSWER_CACHE_MAX) answerCache.delete(answerCache.keys().next().value!);
-    answerCache.set(key, result);
+    if (cache.entries.size >= ANSWER_CACHE_MAX) cache.entries.delete(cache.entries.keys().next().value!);
+    cache.entries.set(key, result);
   }
   return result;
 }

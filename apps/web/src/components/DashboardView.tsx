@@ -88,6 +88,12 @@ export function DashboardView({
 
   return (
     <div className="space-y-6" ref={innerRef}>
+      {spec.computeScope?.sampled && (
+        <p role="status" className="rounded-xl border border-amber-400/30 bg-amber-500/10 p-3 text-sm text-amber-200">
+          Server KPIs and charts use {spec.computeScope.analyzedRows.toLocaleString()} of {spec.computeScope.sourceRows.toLocaleString()} rows.
+          {" "}Their totals describe the sample. Explore questions use the data available on your device.
+        </p>
+      )}
       {/* Persistent context - shown on every tab and kept in exports. */}
       <div className="card flex flex-wrap items-center justify-between gap-3 p-4">
         <div>

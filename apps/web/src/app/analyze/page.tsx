@@ -66,6 +66,7 @@ function mergedDashboardSpec(spec: DashboardSpec, pySpec: PyAnalysisSpec | null)
   const pyCharts = pyChartsToSpecs(pySpec.charts);
   return {
     ...spec,
+    computeScope: pySpec.scope,
     kpis: pySpec.kpis?.length ? pySpec.kpis : spec.kpis,
     charts: pyCharts.length ? pyCharts : spec.charts,
   };

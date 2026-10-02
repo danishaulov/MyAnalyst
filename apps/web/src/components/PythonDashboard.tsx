@@ -5,7 +5,7 @@ import { KpiCard } from "./KpiCard";
 import { PyConclusionsCard } from "./PyConclusionsCard";
 import { Chart } from "./Chart";
 import { pyChartsToSpecs } from "@/lib/py-charts";
-import { runPythonAsk, type PyAnalysisSpec, type PyConclusions } from "@/lib/py-engine";
+import { runPythonAsk, type PyAnalysisSpec, type PyConclusions, type PyAnswer } from "@/lib/py-engine";
 import { currencySymbol, setActiveCurrency } from "@/lib/currency";
 
 // Renders a Python-engine analysis spec (Phase 5). Reuses the existing KPI cards + ECharts <Chart> via the
@@ -24,6 +24,12 @@ export function PythonDashboard({
   const charts = pyChartsToSpecs(spec.charts);
   return (
     <div className="space-y-6">
+      {spec.scope?.sampled && (
+        <p role="status" className="rounded-xl border border-amber-400/30 bg-amber-500/10 p-3 text-sm text-amber-200">
+          Analyzed {spec.scope.analyzedRows.toLocaleString()} of {spec.scope.sourceRows.toLocaleString()} rows.
+          {" "}Totals and findings describe this sample. Use a smaller file for full-dataset totals.
+        </p>
+      )}
       <header className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="text-lg font-semibold text-slate-100">
           {spec.rowCount.toLocaleString()} rows ·{" "}
@@ -160,7 +166,7 @@ export function PythonDashboard({
 function AskBox({ spec, table }: { spec: PyAnalysisSpec; table: { columns: string[]; rows: Record<string, unknown>[] } }) {
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
-  const [turns, setTurns] = useState<{ q: string; a: string; provider: string }[]>([]);
+  const [turns, setTurns] = useState<(PyAnswer & { q: string })[]>([]);
 
   async function ask() {
     const question = q.trim();
@@ -169,9 +175,9 @@ function AskBox({ spec, table }: { spec: PyAnalysisSpec; table: { columns: strin
     setQ("");
     try {
       const res = await runPythonAsk(question, table.columns, table.rows, spec.facts);
-      setTurns((t) => [{ q: question, a: res.answer, provider: res.provider }, ...t]);
+      setTurns((t) => [{ q: question, ...res }, ...t]);
     } catch (e) {
-      setTurns((t) => [{ q: question, a: e instanceof Error ? e.message : "Couldn't answer that.", provider: "error" }, ...t]);
+      setTurns((t) => [{ q: question, answer: e instanceof Error ? e.message : "Couldn't answer that.", provider: "error" }, ...t]);
     } finally {
       setBusy(false);
     }
@@ -202,7 +208,14 @@ function AskBox({ spec, table }: { spec: PyAnalysisSpec; table: { columns: strin
           {turns.map((t, i) => (
             <div key={i} className="rounded-lg border border-[var(--line)] p-3">
               <div className="text-[12px] font-medium text-slate-400">{t.q}</div>
-              <div className="mt-1 text-[13px] text-slate-200">{t.a}</div>
+              <div className="mt-1 text-[13px] text-slate-200">{t.answer}</div>
+              {t.scope?.sampled && <p className="mt-1 text-xs text-amber-200">Computed from {t.scope.analyzedRows.toLocaleString()} sampled rows; totals describe the sample.</p>}
+              {t.method && (
+                <details className="mt-2 text-xs text-slate-400">
+                  <summary className="cursor-pointer">How this was computed</summary>
+                  <p className="mt-1">{t.method}</p>
+                </details>
+              )}
             </div>
           ))}
         </div>
