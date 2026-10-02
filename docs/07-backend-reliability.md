@@ -14,8 +14,8 @@
 - Upload sampling measures actual UTF-8 bytes and verifies the serialized result after estimation. Scope metadata and sample notices survive the main dashboard, share links and report prose.
 - Browser AI caches are scoped to a dataset object and analysis context, rather than filename and row count.
 - The obsolete column-controls browser test is replaced with a regression for the current New analysis workflow, which clears the previous dataset before another upload. PDF report/deck downloads are also exercised after the library upgrade.
-- GitHub CI now runs the live Python engine, HTTP contracts and AI failure tests.
-- Vulnerable production dependencies were updated: Next.js, PDF import/export, chart rendering, SheetJS, and transitive packages. Sharp and PostCSS overrides keep their existing consumers on patched releases without migrating the app to a new Next.js major. CI audits production dependencies. Development-only test-server advisories are tracked separately.
+- Live Python engine, HTTP contract and AI failure tests are included and pass locally. The GitHub workflow update to run these tests and audit production dependencies is supplied as a separate patch: the current GitHub connection cannot push workflow changes without the `workflow` scope. Existing web CI remains unchanged.
+- Vulnerable production dependencies were updated: Next.js, PDF import/export, chart rendering, SheetJS, and transitive packages. Sharp and PostCSS overrides keep their existing consumers on patched releases without migrating the app to a new Next.js major. The local production audit passes with zero vulnerabilities. Development-only test-server advisories remain separate.
 
 ## Validation
 
