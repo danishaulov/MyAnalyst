@@ -705,6 +705,8 @@ export interface DataQuality {
 /** The full declarative result the dashboard renders. */
 export interface DashboardSpec {
   version: string;
+  /** Scope of server-computed KPIs/charts; survives share links and exports. */
+  computeScope?: { sourceRows: number; analyzedRows: number; sampled: boolean };
   datasetName: string;
   domain: DomainGuess;
   /** Detected currency for money formatting across the dashboard (defaults to USD/$). */

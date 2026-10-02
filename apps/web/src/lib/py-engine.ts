@@ -35,6 +35,7 @@ export interface PyQuality {
 
 export interface PyAnalysisSpec {
   engine: "python";
+  scope?: PyScope;
   rowCount: number;
   currency?: { symbol: string; code: string };
   quality?: PyQuality;
@@ -89,7 +90,7 @@ export interface PyRfm {
 }
 
 export interface PyConclusions {
-  provider: "groq" | "none";
+  provider: string;
   bottomLine: string;
   summary?: string;
   chartInsights?: { chart: string; insight: string }[];
@@ -114,19 +115,28 @@ const MAX_PAYLOAD_BYTES = 3_800_000; // safety margin under 4.5 MB
 const HARD_ROW_CAP = 100_000; // statistical plenty; also bounds server compute time
 
 export function sampleForPayload(columns: string[], rows: Record<string, unknown>[]): unknown[][] {
+  if (columns.length > 100) throw new Error("The Python backend supports at most 100 columns per request.");
   const toArr = (r: Record<string, unknown>) => columns.map((c) => r[c] ?? null);
+  const encoder = new TextEncoder();
+  const overhead = encoder.encode(JSON.stringify({ columns, rows: [], sourceRowCount: rows.length })).byteLength;
+  const budget = MAX_PAYLOAD_BYTES - overhead;
+  if (budget <= 0) throw new Error("Column names exceed the upload limit.");
   const n = rows.length;
   if (n === 0) return [];
   const probe = Math.min(300, n);
   let bytes = 0;
-  for (let i = 0; i < probe; i++) bytes += JSON.stringify(toArr(rows[Math.floor((i * n) / probe)])).length + 1;
+  for (let i = 0; i < probe; i++) bytes += encoder.encode(JSON.stringify(toArr(rows[Math.floor((i * n) / probe)]))).byteLength + 1;
   const bytesPerRow = Math.max(1, bytes / probe);
-  const cap = Math.min(n, HARD_ROW_CAP, Math.max(1, Math.floor(MAX_PAYLOAD_BYTES / bytesPerRow)));
-  if (n <= cap) return rows.map(toArr);
-  const stride = n / cap; // even spacing across the whole dataset
-  const out: unknown[][] = [];
-  for (let i = 0; i < cap; i++) out.push(toArr(rows[Math.floor(i * stride)]));
-  return out;
+  let cap = Math.min(n, HARD_ROW_CAP, Math.floor(5_000_000 / Math.max(1, columns.length)), Math.max(1, Math.floor(budget / bytesPerRow)));
+  // Probe estimates can miss a large cell. Check the ACTUAL UTF-8 bytes, resampling the original data
+  // until the complete body fits rather than trusting character counts or a representative row.
+  for (;;) {
+    const out = Array.from({ length: cap }, (_, i) => toArr(rows[Math.floor((i * n) / cap)]));
+    const actual = encoder.encode(JSON.stringify(out)).byteLength;
+    if (actual <= budget) return out;
+    if (cap === 1) throw new Error("A data row exceeds the upload limit. Shorten large text cells.");
+    cap = Math.max(1, Math.min(cap - 1, Math.floor(cap * budget / actual * 0.95)));
+  }
 }
 
 // POST JSON to the Python backend with retries. Cold-start 500s, gateway timeouts, and transient network
@@ -137,14 +147,16 @@ const backoff = (attempt: number) => new Promise((r) => setTimeout(r, 300 * (att
 
 async function postJson<T>(path: string, payload: unknown, label: string, retries = 2): Promise<T> {
   const body = JSON.stringify(payload);
+  if (new TextEncoder().encode(body).byteLength > 4_000_000) throw new Error("Request exceeds the upload limit. Use a smaller dataset.");
   let lastErr: Error = new Error(`${label} failed`);
   for (let attempt = 0; attempt <= retries; attempt++) {
     let res: Response;
     try {
-      res = await fetch(api(path), { method: "POST", headers: { "Content-Type": "application/json" }, body });
+      res = await fetch(api(path), { method: "POST", headers: { "Content-Type": "application/json" }, body, signal: AbortSignal.timeout(65_000) });
     } catch (e) {
       // Network-level failure (DNS, CORS, dropped connection) - transient, retry.
       lastErr = e instanceof Error ? e : new Error(String(e));
+      if (lastErr.name === "TimeoutError" || lastErr.name === "AbortError") throw new Error(`${label} timed out. Please try again.`);
       if (attempt < retries) { await backoff(attempt); continue; }
       throw lastErr;
     }
@@ -153,7 +165,12 @@ async function postJson<T>(path: string, payload: unknown, label: string, retrie
     const msg = err.error || `${label} (${res.status})`;
     if (res.status < 500 && res.status !== 408 && res.status !== 429) throw new Error(msg); // client error: don't retry
     lastErr = new Error(msg);
-    if (attempt < retries) await backoff(attempt);
+    if (attempt < retries) {
+      const retryAfter = Number(res.headers?.get("retry-after"));
+      if (retryAfter > 8) throw lastErr;
+      if (retryAfter > 0) await new Promise((r) => setTimeout(r, retryAfter * 1000));
+      else await backoff(attempt);
+    }
   }
   throw lastErr;
 }
@@ -165,12 +182,22 @@ export async function runPythonAnalysis(
 ): Promise<PyAnalysisSpec> {
   // The client saw the raw cells and detected the currency; the data we send is already cleaned to plain
   // numbers, so pass the currency along so the Python KPIs/charts agree with the rest of the dashboard.
-  return postJson("/api/analyze", { columns, rows: sampleForPayload(columns, rows), currency }, "Python analysis failed");
+  return postJson("/api/analyze", { columns, rows: sampleForPayload(columns, rows), currency, sourceRowCount: rows.length }, "Python analysis failed");
+}
+
+export interface PyScope {
+  sourceRows: number;
+  analyzedRows: number;
+  sampled: boolean;
 }
 
 export interface PyAnswer {
-  provider: "groq" | "none";
+  provider: string;
   answer: string;
+  method?: string;
+  scope?: PyScope;
+  needsClarification?: boolean;
+  grounding?: { grounded: boolean; unverified: string[] };
 }
 
 export async function runPythonAsk(
@@ -179,14 +206,17 @@ export async function runPythonAsk(
   rows: Record<string, unknown>[],
   facts?: PyFact[]
 ): Promise<PyAnswer> {
-  return postJson("/api/ask", { question, columns, rows: sampleForPayload(columns, rows), facts }, "Ask failed");
+  // Facts from a different computation cannot attest to this query. The backend computes fresh evidence.
+  return postJson("/api/ask", { question, columns, rows: sampleForPayload(columns, rows), sourceRowCount: rows.length }, "Ask failed");
 }
 
 export async function runPythonConclusions(spec: PyAnalysisSpec, userContext?: string): Promise<PyConclusions> {
   return postJson(
     "/api/conclude",
     {
-      facts: spec.facts,
+      facts: spec.scope?.sampled
+        ? [{ id: "sample-scope", kind: "scope", text: `This analysis uses a sample of ${spec.scope.analyzedRows} out of ${spec.scope.sourceRows} rows. Totals describe the sample only; do not extrapolate them to the full file.` }, ...spec.facts]
+        : spec.facts,
       kpis: spec.kpis.map((k) => ({ name: k.name, value: k.value })),
       chartReadings: spec.chartReadings,
       domain: spec.domain.domain,

@@ -23,7 +23,10 @@ function buildSlides(spec: DashboardSpec, conclusions?: PyConclusions | null): S
     kind: "title",
     eyebrow: spec.domain.domain.replace(/-/g, " "),
     title: spec.datasetName,
-    body: [`${spec.rowCount.toLocaleString()} rows · ${spec.profiles.length} columns`],
+    body: [
+      `${spec.rowCount.toLocaleString()} rows · ${spec.profiles.length} columns`,
+      ...(spec.computeScope?.sampled ? [`Server KPIs and charts use ${spec.computeScope.analyzedRows.toLocaleString()} of ${spec.computeScope.sourceRows.toLocaleString()} rows; totals describe the sample.`] : []),
+    ],
     badge: spec.quality ? `Data quality ${spec.quality.grade} · ${spec.quality.score}/100` : undefined,
   });
 

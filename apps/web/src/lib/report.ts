@@ -16,6 +16,9 @@ export function buildExecutiveSummary(spec: DashboardSpec): string[] {
   const domainLabel = spec.domain.domain.replace(/-/g, " ");
   const quality = spec.quality ? ` Data quality grades ${spec.quality.grade} (${spec.quality.score}/100).` : "";
   paras.push(`This ${domainLabel} dataset has ${spec.rowCount.toLocaleString()} rows across ${cols} columns.${quality}`);
+  if (spec.computeScope?.sampled) {
+    paras.push(`Server KPIs and charts use a sample of ${spec.computeScope.analyzedRows.toLocaleString()} out of ${spec.computeScope.sourceRows.toLocaleString()} rows. Their totals describe the sample only.`);
+  }
 
   // 2. Headline numbers.
   const kpis = spec.kpis.slice(0, 3);

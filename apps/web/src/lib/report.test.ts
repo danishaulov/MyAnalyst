@@ -29,4 +29,11 @@ describe("buildExecutiveSummary", () => {
     // The whole summary should be plain text (no leftover template artifacts).
     for (const p of paras) expect(p.length).toBeGreaterThan(0);
   });
+
+  it("carries sampled scope into exported report prose", async () => {
+    const spec = await analyze(salesTable(), { skipCharts: true });
+    spec.computeScope = { sourceRows: 1000, analyzedRows: 40, sampled: true };
+    expect(buildExecutiveSummary(spec).join(" ")).toContain("40 out of 1,000 rows");
+    expect(buildExecutiveSummary(spec).join(" ")).toContain("sample only");
+  });
 });

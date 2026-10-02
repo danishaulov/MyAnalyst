@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { sampleForPayload, runPythonConclusions, type PyAnalysisSpec } from "./py-engine";
+import { sampleForPayload, runPythonConclusions, runPythonAnalysis, runPythonAsk, type PyAnalysisSpec } from "./py-engine";
 
 const MAX = 3_800_000;
 
@@ -34,6 +34,25 @@ describe("sampleForPayload (adaptive byte-budget sampling)", () => {
   it("preserves column order in the emitted arrays", () => {
     const out = sampleForPayload(["x", "y", "z"], [{ z: 3, x: 1, y: 2 }]);
     expect(out[0]).toEqual([1, 2, 3]);
+  });
+
+  it("measures actual UTF-8 bytes for Hebrew and emoji, including metadata", () => {
+    const cols = ["שם", "תיאור"];
+    const data = Array.from({ length: 15_000 }, (_, i) => ({ "שם": `לקוח ${i}`, "תיאור": "שלום 📊".repeat(40) }));
+    const out = sampleForPayload(cols, data);
+    expect(new TextEncoder().encode(JSON.stringify({ columns: cols, rows: out, sourceRowCount: data.length })).byteLength).toBeLessThanOrEqual(MAX);
+    expect(out.length).toBeLessThan(data.length);
+  });
+
+  it("checks bytes after estimation even when probes miss unusually large cells", () => {
+    const data = Array.from({ length: 10_000 }, (_, i) => ({ a: i % 100 === 1 ? "x".repeat(60_000) : "x" }));
+    const out = sampleForPayload(["a"], data);
+    expect(new TextEncoder().encode(JSON.stringify(out)).byteLength).toBeLessThan(MAX);
+  });
+
+  it("rejects a single oversized row and an unsupported number of columns", () => {
+    expect(() => sampleForPayload(["a"], [{ a: "x".repeat(4_500_000) }])).toThrow("row exceeds");
+    expect(() => sampleForPayload(Array(101).fill("a"), [{ a: 1 }])).toThrow("100 columns");
   });
 });
 
@@ -77,5 +96,22 @@ describe("postJson retry (via runPythonConclusions)", () => {
     vi.stubGlobal("fetch", fetchMock);
     await expect(runPythonConclusions(CONCLUDE_SPEC)).rejects.toThrow("bad payload");
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("bounds each request and does not repeat a timed out computation", async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new DOMException("timeout", "TimeoutError"));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(runPythonConclusions(CONCLUDE_SPEC)).rejects.toThrow("timed out");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("sends source row count and excludes untrusted facts from the ask computation", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(okRes({ provider: "none" }));
+    vi.stubGlobal("fetch", fetchMock);
+    await runPythonAnalysis(["Revenue"], [{ Revenue: 1 }]);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).sourceRowCount).toBe(1);
+    await runPythonAsk("total Revenue?", ["Revenue"], [{ Revenue: 1 }], [{ id: "x", kind: "kpi", text: "fabricated" }]);
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).not.toHaveProperty("facts");
   });
 });

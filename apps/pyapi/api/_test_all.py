@@ -5,7 +5,7 @@ import sys
 
 here = os.path.dirname(os.path.abspath(__file__))
 failed = 0
-for name in ("_test_engine.py", "_test_conclude.py"):
+for name in ("_test_engine.py", "_test_conclude.py", "_test_backend.py"):
     print(f"\n=== {name} ===")
     rc = subprocess.run([sys.executable, os.path.join(here, name)], cwd=here).returncode
     if rc != 0:

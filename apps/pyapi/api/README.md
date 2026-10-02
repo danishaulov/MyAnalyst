@@ -8,7 +8,7 @@ with the in-browser TypeScript engine kept only as a fallback if the API is unre
 
 Deployed as its **own Vercel project** (`quantia-api` → `https://quantia-api.vercel.app`), separate from the
 Next.js web app — Next shadows `/api/*` in the monorepo, so a same-origin Python function never routes. The
-web app calls this API cross-origin via `NEXT_PUBLIC_PY_API`; CORS is `*`, and the web CSP `connect-src` is
+web app calls this API cross-origin via `NEXT_PUBLIC_PY_API`; CORS uses `API_ALLOWED_ORIGINS`, and the web CSP `connect-src` is
 derived from that origin. See `docs/06-python-migration.md`.
 
 Trade-off accepted: data leaves the browser to the server (the old "data never leaves the page" privacy moat
@@ -48,9 +48,12 @@ Requires `pandas numpy scipy statsmodels` (`pip install -r requirements.txt`).
 - **`_engine.analyze(df) -> dict`** returns a JSON-serializable spec (currency, domain, columns, kpis,
   bestSellers, trend, forecast, stats, outliers, segments, rfm, distributions, charts, facts, chartReadings,
   narrative, methodology) the web frontend renders with the existing ECharts/KPI cards.
-- The engine computes deterministic FACTS; the LLM only narrates them and a **grounding check** flags any
-  figure that doesn't trace back to the facts/KPIs/chart readings — so it can't invent numbers. Conclusions
-  fall back to a grounded templated narrative when no LLM key is set or Groq rate-limits.
+- The engine computes deterministic FACTS; the LLM narrates them and a **numeric evidence check** rejects
+  unsupported figures. One repair is allowed; failed verification falls back to templated facts. This is
+  not proof of semantic correctness. Provider failures and missing keys also use the fallback.
+- `/api/ask` validates a schema-only query plan before computing pandas aggregates and filtering. It
+  returns clarification instead of guessing a metric, and includes a calculation method with its answer.
+- See [backend reliability](../../../docs/07-backend-reliability.md) for limits, testing and next steps.
 - The semantics layer is the heart of it: `revenue_metric` (top-line money, never cost), `is_additive`
   (sum flows, average attributes), `is_transaction_grain`, `detect_domain` (price/volume are only weak
   financial hints; a transaction stream is sales/ops, never a price series).
